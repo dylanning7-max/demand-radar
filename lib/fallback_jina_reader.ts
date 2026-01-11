@@ -74,7 +74,7 @@ export async function fetchJinaReaderText(
 		},
 		signal: options.signal,
 	});
-	if (!res.ok) return { ok: false, error: res.error };
+	if (res.ok === false) return { ok: false, error: res.error };
 
 	const cleaned = truncateText(cleanText(res.text), maxContentChars);
 	return {

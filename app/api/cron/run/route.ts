@@ -8,7 +8,7 @@ import { readIntEnv } from "../../../../lib/utils/env";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+async function handleCron(req: Request) {
 	const owner = `cron-${crypto.randomUUID()}`;
 	const ttlMs = readIntEnv("JOB_LOCK_TTL_MS", 180_000);
 	const nowIso = new Date().toISOString();
@@ -38,4 +38,12 @@ export async function POST(req: Request) {
 	} finally {
 		await releaseLock("pull_now", owner);
 	}
+}
+
+export async function POST(req: Request) {
+	return handleCron(req);
+}
+
+export async function GET(req: Request) {
+	return handleCron(req);
 }

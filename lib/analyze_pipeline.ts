@@ -798,35 +798,44 @@ export async function analyzePipeline(
 			maxBytes: maxFetchBytes,
 			signal,
 		});
-		recordAttempt(
-			"direct",
-			fetched.ok,
-			Date.now() - fetchStart,
-			fetched.ok ? undefined : fetched.error,
-		);
+		let fetchError: string | undefined;
+		if (fetched.ok === false) {
+			fetchError = fetched.error;
+		}
+		recordAttempt("direct", fetched.ok, Date.now() - fetchStart, fetchError);
 
-		if (!fetched.ok) {
+		if (fetched.ok === false) {
+			const errorMessage = fetched.error;
+			const status = fetched.status ?? null;
 			addWarning(
 				warnings,
-				isTimeoutError(fetched.error) ? "FETCH_TIMEOUT" : "FETCH_FAILED",
+				isTimeoutError(errorMessage) ? "FETCH_TIMEOUT" : "FETCH_FAILED",
 				{
 					attempt: "direct",
-					message: fetched.error,
-					status: fetched.status ?? null,
+					message: errorMessage,
+					status,
 				},
 			);
 			directFetchFailed = true;
-			directFetchError = fetched.error;
-			directFetchStatus = fetched.status ?? null;
-			directFallbackReason = fetched.status
-				? `HTTP_${fetched.status}`
+			directFetchError = errorMessage;
+			directFetchStatus = status;
+			directFallbackReason = status
+				? `HTTP_${status}`
 				: "FETCH_FAILED";
 		} else {
 			step = "fetched";
 			const extracted = extractReadability(fetched.text, analysisTargetUrl, {
 				maxContentChars,
 			});
-			if (extracted.ok) {
+			if (extracted.ok === false) {
+				const extractedError = extracted.error;
+				addWarning(warnings, "READABILITY_FAILED", {
+					message: extractedError,
+				});
+				directFetchFailed = true;
+				directFetchError = extractedError;
+				directFallbackReason = "READABILITY_FAILED";
+			} else {
 				title = extracted.title;
 				sourceText = extracted.content_text;
 				extractedLen = extracted.extracted_len;
@@ -850,13 +859,6 @@ export async function analyzePipeline(
 					sourceText = null;
 					extractedLen = 0;
 				}
-			} else {
-				addWarning(warnings, "READABILITY_FAILED", {
-					message: extracted.error,
-				});
-				directFetchFailed = true;
-				directFetchError = extracted.error;
-				directFallbackReason = "READABILITY_FAILED";
 			}
 		}
 
@@ -878,20 +880,24 @@ export async function analyzePipeline(
 				maxContentChars,
 				signal,
 			});
+			let jinaError: string | undefined;
+			if (jina.ok === false) {
+				jinaError = jina.error;
+			}
 			recordAttempt(
 				"jina",
 				jina.ok,
 				Date.now() - jinaStart,
-				jina.ok ? undefined : jina.error,
+				jinaError,
 			);
 			meta.fetch.fallback = true;
 			meta.fetch.direct_error = directFetchError ?? undefined;
 			meta.fetch.direct_status = directFetchStatus ?? undefined;
 
-			if (!jina.ok) {
+			if (jina.ok === false) {
 				if (directFetchFailed || !sourceText) {
 					failReason = directFetchFailed ? "FETCH_FAILED" : "JINA_FAILED";
-					error = directFetchError ?? jina.error;
+					error = directFetchError ?? jinaError ?? "JINA_FAILED";
 					sourceText = null;
 					extractedLen = 0;
 				}

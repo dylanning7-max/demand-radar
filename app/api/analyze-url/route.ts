@@ -44,7 +44,7 @@ export async function POST(req: Request) {
 
 	const rawUrl = parsed.data.url.trim();
 	const validation = validateHttpUrl(rawUrl);
-	if (!validation.ok) {
+	if (validation.ok === false) {
 		return NextResponse.json({ error: validation.error }, { status: 400 });
 	}
 

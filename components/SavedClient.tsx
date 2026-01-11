@@ -11,10 +11,10 @@ type SavedItem = {
 	source_url: string;
 	evidence_quote: string | null;
 	wtp_signal: "STRONG" | "MEDIUM" | "WEAK" | "NONE";
-	action: "saved" | "watching";
+	action: "saved" | "watching" | "ignored" | null;
 	tags: string[];
 	note: string | null;
-	action_updated_at: string;
+	action_updated_at: string | null;
 };
 
 type ApiResponse = { items: SavedItem[]; error?: string };
@@ -190,9 +190,11 @@ export function SavedClient() {
 								<span className={badgeClass(item.wtp_signal)}>
 									{item.wtp_signal}
 								</span>
-								<span className={`${styles.badge} ${styles.badgeInfo}`}>
-									{item.action.toUpperCase()}
-								</span>
+								{item.action ? (
+									<span className={`${styles.badge} ${styles.badgeInfo}`}>
+										{item.action.toUpperCase()}
+									</span>
+								) : null}
 							</div>
 							<Link href={`/history/${item.id}`} className={styles.listTitleLink}>
 								<h3 className={styles.listTitle}>{item.title}</h3>

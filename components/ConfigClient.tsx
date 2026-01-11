@@ -61,19 +61,21 @@ export function ConfigClient() {
 			try {
 				const res = await fetch("/api/config");
 				const data = (await res.json()) as ConfigState | ApiError;
-				if (!res.ok || "error" in data) {
-					setError(data.error ?? "Failed to load config.");
+				const apiError = (data as ApiError).error;
+				if (!res.ok || apiError) {
+					setError(apiError ?? "Failed to load config.");
 					return;
 				}
+				const configData = data as ConfigState;
 				setConfig({
-					schedule_enabled: Boolean(data.schedule_enabled),
-					schedule_interval_minutes: String(data.schedule_interval_minutes),
-					max_content_chars: String(data.max_content_chars),
-					max_per_run: String(data.max_per_run ?? 5),
-					include_comments: Boolean(data.include_comments),
-					comment_max_items: String(data.comment_max_items),
-					cron_secret: String(data.cron_secret ?? ""),
-					updated_at: data.updated_at,
+					schedule_enabled: Boolean(configData.schedule_enabled),
+					schedule_interval_minutes: String(configData.schedule_interval_minutes),
+					max_content_chars: String(configData.max_content_chars),
+					max_per_run: String(configData.max_per_run ?? 5),
+					include_comments: Boolean(configData.include_comments),
+					comment_max_items: String(configData.comment_max_items),
+					cron_secret: String(configData.cron_secret ?? ""),
+					updated_at: configData.updated_at,
 				});
 			} catch (err) {
 				setError(err instanceof Error ? err.message : "Failed to load config.");
@@ -124,19 +126,21 @@ export function ConfigClient() {
 				}),
 			});
 			const data = (await res.json()) as ConfigState | ApiError;
-			if (!res.ok || "error" in data) {
-				setError(data.error ?? `Save failed (${res.status}).`);
+			const apiError = (data as ApiError).error;
+			if (!res.ok || apiError) {
+				setError(apiError ?? `Save failed (${res.status}).`);
 				return;
 			}
+			const configData = data as ConfigState;
 			setConfig({
-				schedule_enabled: Boolean(data.schedule_enabled),
-				schedule_interval_minutes: String(data.schedule_interval_minutes),
-				max_content_chars: String(data.max_content_chars),
-				max_per_run: String(data.max_per_run ?? 5),
-				include_comments: Boolean(data.include_comments),
-				comment_max_items: String(data.comment_max_items),
-				cron_secret: String(data.cron_secret ?? ""),
-				updated_at: data.updated_at,
+				schedule_enabled: Boolean(configData.schedule_enabled),
+				schedule_interval_minutes: String(configData.schedule_interval_minutes),
+				max_content_chars: String(configData.max_content_chars),
+				max_per_run: String(configData.max_per_run ?? 5),
+				include_comments: Boolean(configData.include_comments),
+				comment_max_items: String(configData.comment_max_items),
+				cron_secret: String(configData.cron_secret ?? ""),
+				updated_at: configData.updated_at,
 			});
 			setStatus("Saved");
 		} catch (err) {
