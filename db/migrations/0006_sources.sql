@@ -1,0 +1,2 @@
+ALTER TABLE app_config
+	ADD COLUMN IF NOT EXISTS max_per_run integer NOT NULL DEFAULT 5;
