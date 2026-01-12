@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import styles from "./ui.module.css";
-import { AnalysisActionBar } from "./AnalysisActionBar";
 
 type TopSignal = {
 	id: string;
@@ -70,9 +69,6 @@ export function TopSignalsPanel() {
 		() => parseHours(searchParams.get("signals_hours")),
 		[searchParams],
 	);
-	const showIgnored =
-		searchParams.get("show_ignored") === "1" ||
-		searchParams.get("show_ignored") === "true";
 	const [items, setItems] = useState<TopSignal[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -83,11 +79,7 @@ export function TopSignalsPanel() {
 			setLoading(true);
 			setError(null);
 			try {
-				const res = await fetch(
-					`/api/signals/top?limit=8&hours=${hours}${
-						showIgnored ? "&show_ignored=1" : ""
-					}`,
-				);
+				const res = await fetch(`/api/signals/top?limit=8&hours=${hours}`);
 				const data = (await res.json()) as ApiResponse;
 				if (!res.ok || data.error) {
 					throw new Error(data.error ?? "Failed to load signals.");
@@ -106,42 +98,12 @@ export function TopSignalsPanel() {
 		return () => {
 			alive = false;
 		};
-	}, [hours, showIgnored]);
+	}, [hours]);
 
 	const handleHoursChange = (value: number) => {
 		const params = new URLSearchParams(searchParams.toString());
 		params.set("signals_hours", String(value));
 		router.replace(`/?${params.toString()}`);
-	};
-
-	const handleIgnoredToggle = (checked: boolean) => {
-		const params = new URLSearchParams(searchParams.toString());
-		if (checked) {
-			params.set("show_ignored", "1");
-		} else {
-			params.delete("show_ignored");
-		}
-		router.replace(`/?${params.toString()}`);
-	};
-
-	const updateItemAction = (
-		id: string,
-		next: { action: "saved" | "ignored" | "watching" | null; tags: string[]; note: string | null },
-	) => {
-		setItems((prev) => {
-			const updated = prev.map((item) =>
-				item.id === id
-					? {
-							...item,
-							action: next.action,
-							tags: next.action ? next.tags : [],
-							note: next.action ? next.note : null,
-						}
-					: item,
-			);
-			if (showIgnored) return updated;
-			return updated.filter((item) => item.action !== "ignored");
-		});
 	};
 
 	return (
@@ -166,14 +128,6 @@ export function TopSignalsPanel() {
 							</button>
 						))}
 					</div>
-					<label className={styles.toggleRow}>
-						<input
-							type="checkbox"
-							checked={showIgnored}
-							onChange={(event) => handleIgnoredToggle(event.target.checked)}
-						/>
-						<span className={styles.value}>Show ignored</span>
-					</label>
 					<Link href="/history" className={styles.buttonSecondary}>
 						View all
 					</Link>
@@ -206,15 +160,9 @@ export function TopSignalsPanel() {
 				<div className={styles.list}>
 					{items.map((item) => {
 						const domain = getDomain(item.source_url);
-						const isIgnored = item.action === "ignored";
 						return (
 							<div key={item.id} className={styles.listItem}>
 								<div className={styles.badgeRow}>
-									{isIgnored ? (
-										<span className={`${styles.badge} ${styles.badgeNone}`}>
-											IGNORED
-										</span>
-									) : null}
 									<span className={badgeClass(item.wtp_signal)}>
 										{item.wtp_signal}
 									</span>
@@ -237,19 +185,6 @@ export function TopSignalsPanel() {
 									{item.source_label} · {formatRelativeTime(item.updated_at)}
 									{domain ? ` · ${domain}` : ""}
 								</p>
-								<AnalysisActionBar
-									analysisId={item.id}
-									action={item.action}
-									tags={item.tags}
-									note={item.note}
-									onChange={(next) =>
-										updateItemAction(item.id, {
-											action: next.action,
-											tags: next.tags,
-											note: next.note,
-										})
-									}
-								/>
 							</div>
 						);
 					})}

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import styles from "../components/ui.module.css";
-import { HomeClient } from "../components/HomeClient";
 import { TopSignalsPanel } from "../components/TopSignalsPanel";
 
 export default function HomePage() {
@@ -16,11 +15,11 @@ export default function HomePage() {
 						</p>
 					</div>
 					<div className={styles.headerActions}>
-						<Link className={styles.buttonSecondary} href="/config">
-							Config
-						</Link>
 						<Link className={styles.buttonSecondary} href="/saved">
 							Saved
+						</Link>
+						<Link className={styles.buttonSecondary} href="/admin">
+							Admin
 						</Link>
 					</div>
 				</div>
@@ -52,7 +51,6 @@ export default function HomePage() {
 			>
 				<TopSignalsPanel />
 			</Suspense>
-			<HomeClient />
 		</main>
 	);
 }
