@@ -11,13 +11,17 @@ type TopSignal = {
 	title: string;
 	pain_snippet: string;
 	wtp_signal: "STRONG" | "MEDIUM" | "WEAK" | "NONE";
+	intent_type: "TOOL_DEMAND" | "DISCUSSION" | "CONSUMER" | "OTHER";
+	opportunity_score: number;
+	scores: {
+		pain: number;
+		intent: number;
+		workaround: number;
+		wtp: number;
+	};
 	low_confidence: boolean;
 	source_label: string;
 	source_url: string;
-	action: "saved" | "ignored" | "watching" | null;
-	tags: string[];
-	note: string | null;
-	action_updated_at: string | null;
 };
 
 type ApiResponse = { items: TopSignal[]; error?: string };
@@ -59,6 +63,13 @@ function badgeClass(wtp: TopSignal["wtp_signal"]) {
 	if (wtp === "STRONG") return `${styles.badge} ${styles.badgeStrong}`;
 	if (wtp === "MEDIUM" || wtp === "WEAK")
 		return `${styles.badge} ${styles.badgeWeak}`;
+	return `${styles.badge} ${styles.badgeNone}`;
+}
+
+function intentBadge(intent: TopSignal["intent_type"]) {
+	if (intent === "TOOL_DEMAND") return `${styles.badge} ${styles.badgeInfo}`;
+	if (intent === "CONSUMER") return `${styles.badge} ${styles.badgeWeak}`;
+	if (intent === "DISCUSSION") return `${styles.badge} ${styles.badgeNone}`;
 	return `${styles.badge} ${styles.badgeNone}`;
 }
 
@@ -166,6 +177,12 @@ export function TopSignalsPanel() {
 									<span className={badgeClass(item.wtp_signal)}>
 										{item.wtp_signal}
 									</span>
+									<span className={intentBadge(item.intent_type)}>
+										{item.intent_type}
+									</span>
+									<span className={`${styles.badge} ${styles.badgeInfo}`}>
+										Score {item.opportunity_score}
+									</span>
 									{item.low_confidence ? (
 										<span className={`${styles.badge} ${styles.badgeWeak}`}>
 											Low Confidence
@@ -181,6 +198,10 @@ export function TopSignalsPanel() {
 								{item.pain_snippet ? (
 									<p className={styles.metaLine}>{item.pain_snippet}</p>
 								) : null}
+								<p className={styles.metaLine}>
+									pain {item.scores.pain} · intent {item.scores.intent} · workaround{" "}
+									{item.scores.workaround} · wtp {item.scores.wtp}
+								</p>
 								<p className={styles.metaLine}>
 									{item.source_label} · {formatRelativeTime(item.updated_at)}
 									{domain ? ` · ${domain}` : ""}

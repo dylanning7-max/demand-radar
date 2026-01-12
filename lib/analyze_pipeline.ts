@@ -3,10 +3,9 @@ import { extractReadability } from "./extract_readability";
 import { fetchText } from "./fetch_text";
 import { fetchJinaReaderText } from "./fallback_jina_reader";
 import { normalizeUrl } from "./url_normalize";
-import { buildNeedCardPrompt, NEED_CARD_PROMPT_VERSION } from "./prompts/need_card_v1";
-import { NeedCardV1Schema } from "./schemas/need_card_v1";
-import type { NeedCardV1 } from "./schemas/need_card_v1";
-import { normalizeForMatch } from "./text/normalize";
+import { buildNeedCardPrompt, NEED_CARD_PROMPT_VERSION } from "./prompts/need_card_v2";
+import { NeedCardV2Schema } from "./schemas/need_card_v2";
+import type { NeedCardV2 } from "./schemas/need_card_v2";
 import { readIntEnv } from "./utils/env";
 import {
 	fetchHnItem,
@@ -103,7 +102,7 @@ export type AnalyzePipelineResult = {
 	extracted_len: number;
 	title: string | null;
 	source_text: string | null;
-	need_card: NeedCardV1 | null;
+	need_card: NeedCardV2 | null;
 	fail_reason: FailReason | null;
 	error: string | null;
 	warnings: WarningEntry[];
@@ -221,25 +220,24 @@ function applyTiming(input: {
 }
 
 function downgradeWtp(
-	wtp: NeedCardV1["wtp_signal"],
-): NeedCardV1["wtp_signal"] {
+	wtp: NeedCardV2["wtp_signal"],
+): NeedCardV2["wtp_signal"] {
 	if (wtp === "NONE") return "NONE";
 	return "WEAK";
 }
 
 function applyLowConfidenceGuard(input: {
-	needCard: NeedCardV1;
+	needCard: NeedCardV2;
 	warnings: WarningEntry[];
 	meta: AnalysisMeta;
-	evidenceMatch: "exact" | "normalized" | "fail";
-}): { needCard: NeedCardV1; lowConfidence: boolean } {
+	evidenceHits: number;
+}): { needCard: NeedCardV2; lowConfidence: boolean } {
 	const reasons: string[] = [];
 
-	if (input.evidenceMatch === "fail") {
-		reasons.push("evidence_not_substring");
-	}
-
 	if (input.needCard.kind === "DEMAND") {
+		if (input.evidenceHits === 0) {
+			reasons.push("evidence_not_substring");
+		}
 		if (containsGenericPhrase(input.needCard.trigger)) {
 			reasons.push("generic_trigger");
 		}
@@ -419,7 +417,7 @@ async function generateNeedCardWithLlm(input: {
 	timeoutMs: number;
 	warnings: WarningEntry[];
 	meta: AnalysisMeta;
-}): Promise<NeedCardV1 | null> {
+}): Promise<NeedCardV2 | null> {
 	const prompt = buildNeedCardPrompt({
 		sourceText: input.sourceText,
 		sourceUrl: input.sourceUrl,
@@ -438,7 +436,7 @@ async function generateNeedCardWithLlm(input: {
 			errorMessage = String(err);
 		}
 
-		let validated = parsed ? NeedCardV1Schema.safeParse(parsed) : null;
+		let validated = parsed ? NeedCardV2Schema.safeParse(parsed) : null;
 		if (!parsed || !validated.success) {
 			parseRetry = true;
 			const repairPrompt = [
@@ -452,7 +450,7 @@ async function generateNeedCardWithLlm(input: {
 				.join("\n");
 			const repaired = await callOpenAiJson(repairPrompt, input.timeoutMs);
 			const parsedRepair = JSON.parse(stripJsonWrapper(repaired));
-			const validatedRepair = NeedCardV1Schema.safeParse(parsedRepair);
+			const validatedRepair = NeedCardV2Schema.safeParse(parsedRepair);
 			if (!validatedRepair.success) {
 				addWarning(input.warnings, "LOW_CONFIDENCE", {
 					reason: "JSON_PARSE_FAILED",
@@ -495,47 +493,126 @@ async function generateNeedCardWithLlm(input: {
 	}
 }
 
-function resolveEvidenceMatch(
+function validateEvidenceQuotes(
 	sourceText: string,
-	evidenceQuote: string,
-): { match: "exact" | "normalized" | "fail"; quote: string | null } {
-	if (sourceText.includes(evidenceQuote)) {
-		return { match: "exact", quote: evidenceQuote };
-	}
-	const normalizedSource = normalizeForMatch(sourceText);
-	const normalizedQuote = normalizeForMatch(evidenceQuote);
-	if (!normalizedQuote) {
-		return { match: "fail", quote: null };
-	}
-	if (normalizedSource.includes(normalizedQuote)) {
-		return { match: "normalized", quote: evidenceQuote };
-	}
-	return { match: "fail", quote: null };
+	evidence: NeedCardV2["evidence"],
+	warnings: WarningEntry[],
+): { evidence: NeedCardV2["evidence"]; hits: number } {
+	const normalized: NeedCardV2["evidence"] = {
+		pain_quote: evidence.pain_quote?.trim() || null,
+		workaround_quote: evidence.workaround_quote?.trim() || null,
+		ask_quote: evidence.ask_quote?.trim() || null,
+	};
+
+	let hits = 0;
+	(
+		["pain_quote", "workaround_quote", "ask_quote"] as Array<
+			keyof NeedCardV2["evidence"]
+		>
+	).forEach((field) => {
+		const quote = normalized[field];
+		if (!quote) {
+			normalized[field] = null;
+			return;
+		}
+		if (sourceText.includes(quote)) {
+			hits += 1;
+			return;
+		}
+		normalized[field] = null;
+		addWarning(warnings, `EVIDENCE_QUOTE_NOT_FOUND:${field}`, {
+			quote: quote.slice(0, 120),
+		});
+	});
+
+	return { evidence: normalized, hits };
+}
+
+function computeOpportunityScore(scores: NeedCardV2["scores"]): number {
+	return (
+		2 * scores.pain +
+		2 * scores.workaround +
+		2 * scores.intent +
+		scores.audience +
+		scores.wtp -
+		scores.risk -
+		scores.uncertainty
+	);
 }
 
 function buildFallbackNeedCard(input: {
 	title: string | null;
 	sourceText: string;
 	sourceUrl: string;
-}): NeedCardV1 | null {
+}): NeedCardV2 | null {
 	const candidate = pickEvidenceQuoteCandidate(input.sourceText);
 	const evidenceQuote = ensureEvidenceQuote(input.sourceText, candidate);
-	if (!evidenceQuote) return null;
 
-	const draft: NeedCardV1 = {
+	const wtpSignal = inferWtpSignal(input.sourceText);
+	const wtpScore =
+		wtpSignal === "STRONG"
+			? 5
+			: wtpSignal === "MEDIUM"
+				? 3
+				: wtpSignal === "WEAK"
+					? 2
+					: 1;
+
+	const draft: NeedCardV2 = {
 		kind: "DEMAND",
+		intent_type: "OTHER",
 		title: inferTitle(input.title, input.sourceText),
 		who: inferWho(input.sourceText, input.title),
 		pain: inferPain(input.title, evidenceQuote, input.sourceText),
 		trigger: inferTrigger(input.sourceText, evidenceQuote),
 		workaround: inferWorkaround(input.sourceText),
-		wtp_signal: inferWtpSignal(input.sourceText),
-		evidence_quote: evidenceQuote,
+		wtp_signal: wtpSignal,
+		evidence_quote: evidenceQuote ?? undefined,
 		source_url: input.sourceUrl,
+		scores: {
+			pain: 2,
+			intent: 2,
+			workaround: 1,
+			audience: 2,
+			wtp: wtpScore,
+			risk: 2,
+			uncertainty: 2,
+		},
+		evidence: {
+			pain_quote: evidenceQuote,
+			workaround_quote: null,
+			ask_quote: null,
+		},
+		next_action: ["Review source context", "Confirm need intent"],
 	};
 
-	const parsed = NeedCardV1Schema.safeParse(draft);
+	const parsed = NeedCardV2Schema.safeParse(draft);
 	return parsed.success ? parsed.data : null;
+}
+
+function ensureDemandCard(input: {
+	card: NeedCardV2;
+	title: string | null;
+	sourceText: string;
+}): NeedCardV2 {
+	if (input.card.kind === "DEMAND") return input.card;
+	const evidenceHint =
+		input.card.evidence?.pain_quote ??
+		input.card.evidence?.workaround_quote ??
+		input.card.evidence?.ask_quote ??
+		null;
+	return {
+		...input.card,
+		kind: "DEMAND",
+		who: input.card.who ?? inferWho(input.sourceText, input.title),
+		pain:
+			input.card.pain ??
+			inferPain(input.title, evidenceHint, input.sourceText),
+		trigger:
+			input.card.trigger ??
+			inferTrigger(input.sourceText, evidenceHint),
+		workaround: input.card.workaround ?? inferWorkaround(input.sourceText),
+	};
 }
 
 async function buildHnDiscussionText(params: {
@@ -608,7 +685,7 @@ function generateNeedCardHeuristic(input: {
 	title: string | null;
 	sourceText: string;
 	sourceUrl: string;
-}): NeedCardV1 | null {
+}): NeedCardV2 | null {
 	return buildFallbackNeedCard({
 		title: input.title,
 		sourceText: input.sourceText,
@@ -1012,49 +1089,68 @@ export async function analyzePipeline(
 		addWarning(warnings, "LOW_CONFIDENCE", { reason: "LLM_FAILED" });
 	}
 
-	const evidenceResult = resolveEvidenceMatch(
+	const evidenceCheck = validateEvidenceQuotes(
 		sourceText,
-		needCard.evidence_quote,
+		needCard.evidence,
+		warnings,
 	);
-	let evidenceMatch = evidenceResult.match;
-	if (evidenceResult.match === "fail") {
-		const fallbackQuote = ensureEvidenceQuote(
-			sourceText,
-			pickEvidenceQuoteCandidate(sourceText),
-		);
-		if (!fallbackQuote) {
-			addWarning(warnings, "QUOTE_NOT_FOUND");
-			captureErrorMeta(meta, new Error("QUOTE_NOT_FOUND"));
-			applyTiming({ meta, totalStart, hnDuration, fetchDuration, llmMs: llmDuration });
-			return {
-				url,
-				url_normalized: urlNormalized,
-				step,
-				extractor_used: extractorUsed,
-				extracted_len: extractedLen,
-				title,
-				source_text: sourceText,
-				need_card: null,
-				fail_reason: "QUOTE_NOT_FOUND",
-				error: "QUOTE_NOT_FOUND",
-				warnings,
-				meta,
-				low_confidence: true,
-			};
-		}
-		needCard = { ...needCard, evidence_quote: fallbackQuote };
-		evidenceMatch = "fail";
+	const evidenceHits = evidenceCheck.hits;
+	needCard = {
+		...needCard,
+		evidence: evidenceCheck.evidence,
+		evidence_hits: evidenceHits,
+		opportunity_score: computeOpportunityScore(needCard.scores),
+	};
+
+	const primaryEvidence =
+		needCard.evidence.pain_quote ??
+		needCard.evidence.workaround_quote ??
+		needCard.evidence.ask_quote ??
+		null;
+	if (primaryEvidence) {
+		needCard = { ...needCard, evidence_quote: primaryEvidence };
 	}
-	meta.evidence = { match: evidenceMatch };
+	meta.evidence = { match: evidenceHits > 0 ? "exact" : "fail" };
+
+	let finalKind: NeedCardV2["kind"] = needCard.kind;
+	let finalNoDemandReason = needCard.no_demand_reason;
+	if (needCard.intent_type === "DISCUSSION") {
+		finalKind = "NO_DEMAND";
+		finalNoDemandReason = finalNoDemandReason ?? "Discussion-only content.";
+	} else if (evidenceHits >= 2) {
+		finalKind = "DEMAND";
+	} else {
+		finalKind = "NO_DEMAND";
+		finalNoDemandReason =
+			finalNoDemandReason ?? "Insufficient evidence of tool demand.";
+		if (needCard.scores.pain >= 4) {
+			addWarning(warnings, "HIGH_PAIN_LOW_EVIDENCE");
+		}
+	}
+
+	if (finalKind === "NO_DEMAND") {
+		needCard = {
+			...needCard,
+			kind: "NO_DEMAND",
+			no_demand_reason: finalNoDemandReason ?? "No demand signal.",
+			wtp_signal: "NONE",
+		};
+	} else {
+		needCard = ensureDemandCard({ card: needCard, title, sourceText });
+	}
 
 	const guarded = applyLowConfidenceGuard({
 		needCard,
 		warnings,
 		meta,
-		evidenceMatch,
+		evidenceHits,
 	});
 	needCard = guarded.needCard;
 	lowConfidence = guarded.lowConfidence || llmFailed;
+
+	if (finalKind === "DEMAND" && evidenceHits < 2) {
+		lowConfidence = true;
+	}
 
 	if (llmFailed && needCard.kind === "DEMAND") {
 		needCard = { ...needCard, wtp_signal: downgradeWtp(needCard.wtp_signal) };

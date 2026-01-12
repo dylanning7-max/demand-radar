@@ -1,31 +1,38 @@
-export type DemandNeedCardDTO = {
-	kind: "DEMAND";
+export type NeedCardDTO = {
+	kind: "DEMAND" | "NO_DEMAND";
+	intent_type?: "TOOL_DEMAND" | "DISCUSSION" | "CONSUMER" | "OTHER";
 	title: string;
-	who: string;
-	pain: string;
-	trigger: string;
-	workaround: string;
-	wtp_signal: "STRONG" | "MEDIUM" | "WEAK" | "NONE";
-	evidence_quote: string;
-	source_url: string;
-	tags?: string[];
-};
-
-export type NoDemandNeedCardDTO = {
-	kind: "NO_DEMAND";
-	title: string;
-	no_demand_reason: string;
-	wtp_signal: "NONE";
-	evidence_quote: string;
-	source_url: string;
-	tags?: string[];
 	who?: string;
 	pain?: string;
 	trigger?: string;
 	workaround?: string;
+	wtp_signal: "STRONG" | "MEDIUM" | "WEAK" | "NONE";
+	evidence_quote?: string | null;
+	source_url: string;
+	tags?: string[];
+	no_demand_reason?: string;
+	scores?: {
+		pain: number;
+		intent: number;
+		workaround: number;
+		audience: number;
+		wtp: number;
+		risk: number;
+		uncertainty: number;
+	};
+	evidence?: {
+		pain_quote: string | null;
+		workaround_quote: string | null;
+		ask_quote: string | null;
+	};
+	evidence_hits?: number;
+	opportunity_score?: number;
+	next_action?: string[];
+	score_notes?: Partial<Record<
+		"pain" | "intent" | "workaround" | "audience" | "wtp" | "risk" | "uncertainty",
+		string
+	>>;
 };
-
-export type NeedCardDTO = DemandNeedCardDTO | NoDemandNeedCardDTO;
 
 export type UrlAnalysisDTO = {
 	id: string;

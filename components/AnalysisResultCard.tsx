@@ -36,6 +36,12 @@ export function AnalysisResultCard({ title, analysis }: AnalysisResultCardProps)
 		?.evidence;
 	const isNoDemand = needCard?.kind === "NO_DEMAND";
 	const tags = Array.isArray(analysis.tags) ? analysis.tags : [];
+	const evidence = needCard?.evidence;
+	const evidenceQuotes = [
+		{ label: "Pain", quote: evidence?.pain_quote },
+		{ label: "Workaround", quote: evidence?.workaround_quote },
+		{ label: "Ask", quote: evidence?.ask_quote },
+	].filter((item) => item.quote);
 
 	return (
 		<section className={styles.card}>
@@ -66,7 +72,9 @@ export function AnalysisResultCard({ title, analysis }: AnalysisResultCardProps)
 			{needCard ? (
 				<>
 					<p className={styles.pain}>
-						{isNoDemand ? needCard.no_demand_reason : needCard.pain}
+						{isNoDemand
+							? needCard.no_demand_reason
+							: needCard.pain ?? "--"}
 					</p>
 					<div className={styles.grid}>
 						<div className={styles.field}>
@@ -77,15 +85,17 @@ export function AnalysisResultCard({ title, analysis }: AnalysisResultCardProps)
 							<>
 								<div className={styles.field}>
 									<div className={styles.label}>Who</div>
-									<div className={styles.value}>{needCard.who}</div>
+									<div className={styles.value}>{needCard.who ?? "--"}</div>
 								</div>
 								<div className={styles.field}>
 									<div className={styles.label}>Trigger</div>
-									<div className={styles.value}>{needCard.trigger}</div>
+									<div className={styles.value}>{needCard.trigger ?? "--"}</div>
 								</div>
 								<div className={styles.field}>
 									<div className={styles.label}>Workaround</div>
-									<div className={styles.value}>{needCard.workaround}</div>
+									<div className={styles.value}>
+										{needCard.workaround ?? "--"}
+									</div>
 								</div>
 							</>
 						) : null}
@@ -111,7 +121,16 @@ export function AnalysisResultCard({ title, analysis }: AnalysisResultCardProps)
 						</div>
 					) : null}
 
-					{needCard.evidence_quote ? (
+					{evidenceQuotes.length > 0 ? (
+						<div className={styles.section}>
+							<div className={styles.label}>Evidence</div>
+							{evidenceQuotes.map((item) => (
+								<blockquote key={item.label} className={styles.blockquote}>
+									[{item.label}] {item.quote}
+								</blockquote>
+							))}
+						</div>
+					) : needCard.evidence_quote ? (
 						<blockquote className={styles.blockquote}>
 							{needCard.evidence_quote}
 						</blockquote>

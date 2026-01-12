@@ -6,6 +6,14 @@ export type TopSignal = {
 	title: string;
 	pain_snippet: string;
 	wtp_signal: "STRONG" | "MEDIUM" | "WEAK" | "NONE";
+	intent_type: "TOOL_DEMAND" | "DISCUSSION" | "CONSUMER" | "OTHER";
+	opportunity_score: number;
+	scores: {
+		pain: number;
+		intent: number;
+		workaround: number;
+		wtp: number;
+	};
 	low_confidence: boolean;
 	source_label: string;
 	source_url: string;
@@ -35,6 +43,13 @@ const WTP_WEIGHT: Record<string, number> = {
 	MEDIUM: 2,
 	WEAK: 1,
 	NONE: 0,
+};
+
+const DEFAULT_SCORES = {
+	pain: 1,
+	intent: 1,
+	workaround: 1,
+	wtp: 1,
 };
 
 function clampText(text: string, maxChars: number): string {
@@ -96,6 +111,50 @@ function extractSnippet(card: Record<string, unknown>): string {
 	return "";
 }
 
+function extractIntentType(card: Record<string, unknown>): TopSignal["intent_type"] {
+	const raw = String(card.intent_type ?? "").toUpperCase();
+	if (raw === "TOOL_DEMAND") return "TOOL_DEMAND";
+	if (raw === "DISCUSSION") return "DISCUSSION";
+	if (raw === "CONSUMER") return "CONSUMER";
+	return "OTHER";
+}
+
+function extractScores(card: Record<string, unknown>): TopSignal["scores"] {
+	const scores = card.scores as Record<string, unknown> | undefined;
+	if (!scores) return { ...DEFAULT_SCORES };
+	const pain = Number(scores.pain ?? DEFAULT_SCORES.pain);
+	const intent = Number(scores.intent ?? DEFAULT_SCORES.intent);
+	const workaround = Number(scores.workaround ?? DEFAULT_SCORES.workaround);
+	const wtp = Number(scores.wtp ?? DEFAULT_SCORES.wtp);
+	return {
+		pain: Number.isFinite(pain) ? pain : DEFAULT_SCORES.pain,
+		intent: Number.isFinite(intent) ? intent : DEFAULT_SCORES.intent,
+		workaround: Number.isFinite(workaround) ? workaround : DEFAULT_SCORES.workaround,
+		wtp: Number.isFinite(wtp) ? wtp : DEFAULT_SCORES.wtp,
+	};
+}
+
+function extractOpportunityScore(card: Record<string, unknown>, scores: TopSignal["scores"]): number {
+	const raw = Number((card as { opportunity_score?: unknown }).opportunity_score);
+	if (Number.isFinite(raw)) return raw;
+	const scoreBag = card.scores as Record<string, unknown> | undefined;
+	const audience = Number(scoreBag?.audience ?? 1);
+	const risk = Number(scoreBag?.risk ?? 1);
+	const uncertainty = Number(scoreBag?.uncertainty ?? 1);
+	const safeAudience = Number.isFinite(audience) ? audience : 1;
+	const safeRisk = Number.isFinite(risk) ? risk : 1;
+	const safeUncertainty = Number.isFinite(uncertainty) ? uncertainty : 1;
+	return (
+		2 * scores.pain +
+		2 * scores.workaround +
+		2 * scores.intent +
+		safeAudience +
+		scores.wtp -
+		safeRisk -
+		safeUncertainty
+	);
+}
+
 function extractSourceUrl(row: RawSignalRow): string {
 	const meta = row.meta as { hn?: { target_url?: unknown } } | null;
 	const hnTarget =
@@ -150,6 +209,9 @@ export async function getTopSignals(input: {
 		if (!demand || noDemand) continue;
 		const wtp = extractWtp(card);
 		if (wtp === "NONE") continue;
+		const intentType = extractIntentType(card);
+		const scores = extractScores(card);
+		const opportunityScore = extractOpportunityScore(card, scores);
 
 		const action =
 			row.action === "saved" || row.action === "ignored" || row.action === "watching"
@@ -163,6 +225,9 @@ export async function getTopSignals(input: {
 			title: extractTitle(card),
 			pain_snippet: extractSnippet(card),
 			wtp_signal: wtp,
+			intent_type: intentType,
+			opportunity_score: opportunityScore,
+			scores,
 			low_confidence: Boolean(row.low_confidence),
 			source_label: row.source_label ?? "Manual",
 			source_url: extractSourceUrl(row),
@@ -174,12 +239,15 @@ export async function getTopSignals(input: {
 	}
 
 	filtered.sort((a, b) => {
-		const aLow = a.low_confidence ? 1 : 0;
-		const bLow = b.low_confidence ? 1 : 0;
-		if (aLow !== bLow) return aLow - bLow;
 		const aWtp = WTP_WEIGHT[a.wtp_signal] ?? 0;
 		const bWtp = WTP_WEIGHT[b.wtp_signal] ?? 0;
 		if (aWtp !== bWtp) return bWtp - aWtp;
+		const aLow = a.low_confidence ? 1 : 0;
+		const bLow = b.low_confidence ? 1 : 0;
+		if (aLow !== bLow) return aLow - bLow;
+		if (a.opportunity_score !== b.opportunity_score) {
+			return b.opportunity_score - a.opportunity_score;
+		}
 		const aTime = Date.parse(a.updated_at);
 		const bTime = Date.parse(b.updated_at);
 		if (!Number.isNaN(aTime) && !Number.isNaN(bTime)) return bTime - aTime;

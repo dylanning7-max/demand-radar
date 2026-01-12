@@ -14,7 +14,7 @@ function isPublicAsset(pathname: string): boolean {
 	);
 }
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
 	const { pathname } = req.nextUrl;
 	if (isPublicAsset(pathname)) {
 		return NextResponse.next();
